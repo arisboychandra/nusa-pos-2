@@ -1,51 +1,31 @@
-# NUSA POS 2.0 — Admin v0.2.0
+# NUSA POS 2.0 Admin v0.4.0 (integrated navigation)
 
-Frontend React + Vite + Supabase untuk Kopi Nusa.
+Paket ini berbasis pada ZIP v0.2.0 yang diunggah pengguna. Tidak membuat Supabase project atau lingkungan baru.
 
-## Perubahan v0.2.0
-- Dashboard Admin aktif, delapan kartu keuangan, grafik omzet harian, filter 7 hari / bulan / tahun / rentang tanggal, selector outlet multi-outlet.
-- Menampilkan **data aktual dari Supabase** `sales` dan `sale_payments` untuk transaksi `completed` pada periode terpilih; tidak ada data contoh atau omzet POSe yang dibuat-buat.
-- **Pengeluaran** dan **Estimasi Laba Operasional** tampil *Belum tersedia* sampai tabel Pembukuan dan pengeluaran final dibuat.
-- Menu Produk, login Supabase, pemilihan outlet, edit harga dan RLS dipertahankan.
-- Modul kasir tetap nonaktif karena checkout terpadu, resep, dan stok belum siap produksi.
+## Deploy
 
-## Mengunggah ke GitHub melalui browser
-1. Buka repositori GitHub `nusa-pos-2`.
-2. Ubah/unggah berkas dari ZIP ini ke **root** repositori (`package.json` harus berada di root), bukan ke subfolder baru.
-3. Commit ke branch `main`. Vercel yang terhubung ke repositori akan deploy secara otomatis.
-4. Jangan mengganti project Vercel/Supabase dan jangan mengunggah `.env` lokal.
+1. Backup atau download repository GitHub saat ini.
+2. Salin **isi** ZIP ini ke root repository GitHub `nusa-pos-2` (bukan membuat subfolder). Terutama pastikan `src/main.jsx`, `src/modules.jsx`, dan `src/style.css` terganti/ditambahkan.
+3. Commit ke `main`; Vercel akan membangun ulang.
+4. Konfigurasi Vercel Production yang sudah ada dipertahankan: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`.
+5. Periksa build Vercel sebelum mengarahkan transaksi apa pun ke aplikasi.
 
-## Environment Variables (sudah ada di Vercel)
-- `VITE_SUPABASE_URL` — URL root project Supabase (`https://....supabase.co`)
-- `VITE_SUPABASE_PUBLISHABLE_KEY` — publishable key `sb_publishable_...`
+## Modul
 
-Jangan menaruh service role key, secret key, atau password database ke frontend.
+- Dashboard: angka dan grafik dari tabel `sales` dan `sale_payments`.
+- Menu Produk: katalog dan perubahan harga via `set_product_price`.
+- Inventory: saldo, stok masuk via `receive_inventory`, mutasi, resep draft via `create_recipe_draft`/`save_recipe_material`, aktivasi via `activate_recipe_version`.
+- Kasir Booth/Online: katalog dan keranjang nyata; **checkout tetap nonaktif** karena fungsi transaksi terpadu dan addon belum diaudit.
+- Laporan: daftar transaksi, rekap harian, ringkasan omzet/HPP, riwayat shift (dibatasi 500 transaksi terakhir, bukan laporan penuh).
+- Manajemen Tim: pembacaan membership saja.
+- Pembukuan: tampilan modul dan pemberitahuan status; **belum ada jurnal seimbang/RPC posting**, tidak menerima transaksi keuangan.
+- Pengaturan: informasi outlet baca saja.
+- Shift: modul `ShiftModule` tersedia, tetapi belum dihubungkan ke navigasi; penutupan shift tidak disarankan sebelum checkout terpadu selesai.
 
-## Pengembangan lokal opsional
-```
-npm install
-npm run dev
-npm run build
-```
+## Peringatan
 
-## Batasan akuntansi
-- Dashboard `Total Omzet`: total `sales.total_amount` status `completed` termasuk transaksi Online yang belum settlement. Settlement tidak ditambahkan lagi ke omzet.
-- `Cash Booth` dan `QRIS Booth`: jumlah `sale_payments.amount` yang terkonfirmasi untuk sales Booth pada periode terkait.
-- `Total HPP`: snapshot `sales.total_hpp`. Nilai ini bisa belum representatif apabila resep dan inventory belum lengkap.
-- `Laba Kotor`: Omzet dikurangi HPP; belum mengurangi komisi platform/biaya lainnya.
-- Transaksi void tidak dihitung. Riwayat POSe belum termasuk sebelum migrasi dilakukan.
-- Rentang sangat besar dibatasi sampai 10.000 transaksi per pemuatan, dengan peringatan bila terlampaui. Grafik harian dibatasi 366 hari.
+Ini **bukan aplikasi POS siap transaksi produksi**. Jangan mengaktifkan fungsi checkout lama atau mengasumsikan Pengeluaran/Pembukuan sudah tersedia. Tidak ada data historis POSe diimpor oleh paket ini. Perubahan pada Supabase bergantung pada SQL tahap sebelumnya yang telah berhasil dijalankan.
 
-## Catatan keamanan
-Pemeriksaan Supabase RLS dan pengujian checkout tetap diperlukan sebelum transaksi produksi. Dashboard adalah tampilan baca-saja dan tidak memodifikasi data transaksi.
+## Build
 
-
-## v0.3.0 — Inventory & Resep
-
-Menu **Inventory** sekarang aktif dengan: Master Bahan & Saldo, Stok Masuk, Riwayat Penerimaan, dan Resep & HPP. Pemakaian RPC yang sudah dibuat pada tahap SQL sebelumnya: `receive_inventory`, `create_recipe_draft`, `save_recipe_material`, `activate_recipe_version`.
-
-**Syarat**: SQL Tahap 03A–03C, 03B, 04G-1, 04G-7, 04G-8 sudah diterapkan. Akun harus terhubung ke `profiles` dan `outlet_memberships`. Owner/Admin bisa mengelola resep; Owner/Admin/Manager bisa mencatat stok masuk. Pada aplikasi tetap gunakan environment variables yang sama (jangan mengupload `.env`).
-
-**Batasan**: harga bahan yang belum tercatat dapat menyebabkan HPP belum tersedia. Aplikasi tidak langsung mengubah saldo stok; semua penerimaan memakai RPC terkontrol. Pengurangan stok lewat checkout tetap NONAKTIF. Jangan menggunakan stok uji sebagai stok produksi.
-
-**Perbarui GitHub**: unggah seluruh isi ZIP ini ke root repository yang saat ini dipakai Vercel. Pastikan `src/main.jsx` dan `src/style.css` benar-benar tertimpa, dan teks versi sidebar berubah ke `0.3.0`.
+`npm install` lalu `npm run build`. Build lokal tidak dapat diverifikasi di sesi pembuatan paket akibat pemasangan dependency yang time out. Pantau Build Logs Vercel setelah upload dan kirim error jika ada.
