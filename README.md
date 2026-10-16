@@ -1,43 +1,40 @@
-# NUSA POS 2.0 — Starter Frontend Admin
+# NUSA POS 2.0 — Admin v0.2.0
 
-Starter web React + Vite + Supabase untuk Kopi Nusa. **Belum siap transaksi produksi.**
+Frontend React + Vite + Supabase untuk Kopi Nusa.
 
-## Yang sudah berfungsi
-- Login email/password Supabase Auth.
-- Membaca profil, membership, dan pemilihan outlet yang diizinkan.
-- Menampilkan master produk, kategori, status, dan harga Booth/Online.
-- Pencarian produk, filter menu/addon, dan edit harga dengan RPC `set_product_price` yang dibuat pada Tahap 04G-5A.
-- Layout responsif Admin dengan sidebar untuk modul-modul yang akan dibangun.
+## Perubahan v0.2.0
+- Dashboard Admin aktif, delapan kartu keuangan, grafik omzet harian, filter 7 hari / bulan / tahun / rentang tanggal, selector outlet multi-outlet.
+- Menampilkan **data aktual dari Supabase** `sales` dan `sale_payments` untuk transaksi `completed` pada periode terpilih; tidak ada data contoh atau omzet POSe yang dibuat-buat.
+- **Pengeluaran** dan **Estimasi Laba Operasional** tampil *Belum tersedia* sampai tabel Pembukuan dan pengeluaran final dibuat.
+- Menu Produk, login Supabase, pemilihan outlet, edit harga dan RLS dipertahankan.
+- Modul kasir tetap nonaktif karena checkout terpadu, resep, dan stok belum siap produksi.
 
-## Yang belum ada
-- CRUD produk/kategori, upload foto, resep, stok masuk lewat UI, kasir, addon checkout, pembukuan, dan laporan sungguhan.
-- Menu yang belum dibangun sengaja **nonaktif**.
+## Mengunggah ke GitHub melalui browser
+1. Buka repositori GitHub `nusa-pos-2`.
+2. Ubah/unggah berkas dari ZIP ini ke **root** repositori (`package.json` harus berada di root), bukan ke subfolder baru.
+3. Commit ke branch `main`. Vercel yang terhubung ke repositori akan deploy secara otomatis.
+4. Jangan mengganti project Vercel/Supabase dan jangan mengunggah `.env` lokal.
 
-## Persiapan Supabase
-1. **Gunakan project NUSA POS, bukan Aurora Digital.**
-2. Pastikan semua SQL fondasi yang sudah dikerjakan berhasil, khususnya tabel `profiles`, `outlet_memberships`, `products`, `product_prices`, serta RPC `set_product_price`.
-3. Di Supabase Authentication > Users buat user, lalu pastikan profil dan membership outlet `KN-001` sudah dihubungkan seperti SQL Tahap 01C.
-4. Ambil Project URL dan **publishable key** (atau legacy anon key) dari Supabase project Settings > API Keys. **JANGAN gunakan service_role atau secret key di frontend.**
+## Environment Variables (sudah ada di Vercel)
+- `VITE_SUPABASE_URL` — URL root project Supabase (`https://....supabase.co`)
+- `VITE_SUPABASE_PUBLISHABLE_KEY` — publishable key `sb_publishable_...`
 
-## Jalankan lokal (Windows)
-1. Instal Node.js LTS dari https://nodejs.org/ jika belum ada.
-2. Buka folder project di VS Code atau terminal.
-3. Salin `.env.example` menjadi `.env` dan isi:
+Jangan menaruh service role key, secret key, atau password database ke frontend.
 
-   VITE_SUPABASE_URL=https://PROJECT_REF.supabase.co
-   VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+## Pengembangan lokal opsional
+```
+npm install
+npm run dev
+npm run build
+```
 
-4. Jalankan `npm install`, lalu `npm run dev`. Buka alamat localhost yang tampil.
+## Batasan akuntansi
+- Dashboard `Total Omzet`: total `sales.total_amount` status `completed` termasuk transaksi Online yang belum settlement. Settlement tidak ditambahkan lagi ke omzet.
+- `Cash Booth` dan `QRIS Booth`: jumlah `sale_payments.amount` yang terkonfirmasi untuk sales Booth pada periode terkait.
+- `Total HPP`: snapshot `sales.total_hpp`. Nilai ini bisa belum representatif apabila resep dan inventory belum lengkap.
+- `Laba Kotor`: Omzet dikurangi HPP; belum mengurangi komisi platform/biaya lainnya.
+- Transaksi void tidak dihitung. Riwayat POSe belum termasuk sebelum migrasi dilakukan.
+- Rentang sangat besar dibatasi sampai 10.000 transaksi per pemuatan, dengan peringatan bila terlampaui. Grafik harian dibatasi 366 hari.
 
-## Upload ke GitHub dan Vercel
-1. Upload **isi folder project** ke repository GitHub baru `nusa-pos-2` (jangan sertakan `.env`).
-2. Di Vercel: Add New > Project > Import Git Repository, pilih repository tersebut.
-3. Framework: Vite; Build command: `npm run build`; Output directory: `dist`.
-4. Di Vercel > Settings > Environment Variables isi `VITE_SUPABASE_URL` dan `VITE_SUPABASE_PUBLISHABLE_KEY`, lalu deploy/redeploy.
-5. Supabase > Authentication > URL Configuration: sesuaikan Site URL/Redirect URLs saat menambahkan alur email link/password recovery di tahap berikutnya.
-
-## Batasan keamanan
-- App memakai Row Level Security yang sudah ditetapkan di Supabase, bukan mengandalkan penyembunyian tombol saja.
-- Publikasi starter bukan berarti checkout siap: fungsi checkout lama sebelumnya dibekukan. Jangan aktifkan kembali sebelum pengujian.
-- Edit Booth dan Online mengirim dua permintaan RPC terpisah. Bila salah satu gagal, harga pertama mungkin sudah tersimpan; error ditampilkan dan data dimuat ulang. Kelak kita sediakan fungsi edit harga berpasangan secara atomik.
-- Perlu review menyeluruh RLS, hak akses role manager, audit mutasi dan replay request sebelum produksi.
+## Catatan keamanan
+Pemeriksaan Supabase RLS dan pengujian checkout tetap diperlukan sebelum transaksi produksi. Dashboard adalah tampilan baca-saja dan tidak memodifikasi data transaksi.
