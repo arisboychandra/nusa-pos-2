@@ -1,31 +1,19 @@
-# NUSA POS 2.0 Admin v0.4.0 (integrated navigation)
+# NUSA POS 2.0 Admin v0.4.1 — Foto Produk
 
-Paket ini berbasis pada ZIP v0.2.0 yang diunggah pengguna. Tidak membuat Supabase project atau lingkungan baru.
+Update dari v0.4.0. Dashboard, menu, inventory, kasir (mode persiapan), dan modul lain tetap ada.
 
-## Deploy
+## Upload ke GitHub
 
-1. Backup atau download repository GitHub saat ini.
-2. Salin **isi** ZIP ini ke root repository GitHub `nusa-pos-2` (bukan membuat subfolder). Terutama pastikan `src/main.jsx`, `src/modules.jsx`, dan `src/style.css` terganti/ditambahkan.
-3. Commit ke `main`; Vercel akan membangun ulang.
-4. Konfigurasi Vercel Production yang sudah ada dipertahankan: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`.
-5. Periksa build Vercel sebelum mengarahkan transaksi apa pun ke aplikasi.
+Unggah **isi folder ini ke root repository**, bukan folder pembungkus. File yang berubah: `src/main.jsx`, `src/style.css`, `package.json`. File lain ikut disertakan untuk memudahkan penggantian total. Pastikan Anda memperbarui file lama, bukan menambahkan duplikat pada folder lain. Setelah commit, periksa deployment Vercel terbaru.
 
-## Modul
+## Setup Storage Supabase (SATU KALI)
 
-- Dashboard: angka dan grafik dari tabel `sales` dan `sale_payments`.
-- Menu Produk: katalog dan perubahan harga via `set_product_price`.
-- Inventory: saldo, stok masuk via `receive_inventory`, mutasi, resep draft via `create_recipe_draft`/`save_recipe_material`, aktivasi via `activate_recipe_version`.
-- Kasir Booth/Online: katalog dan keranjang nyata; **checkout tetap nonaktif** karena fungsi transaksi terpadu dan addon belum diaudit.
-- Laporan: daftar transaksi, rekap harian, ringkasan omzet/HPP, riwayat shift (dibatasi 500 transaksi terakhir, bukan laporan penuh).
-- Manajemen Tim: pembacaan membership saja.
-- Pembukuan: tampilan modul dan pemberitahuan status; **belum ada jurnal seimbang/RPC posting**, tidak menerima transaksi keuangan.
-- Pengaturan: informasi outlet baca saja.
-- Shift: modul `ShiftModule` tersedia, tetapi belum dihubungkan ke navigasi; penutupan shift tidak disarankan sebelum checkout terpadu selesai.
+Buka Supabase project NUSA POS 2.0 > SQL Editor; jalankan `supabase/setup_product_images.sql` sekali. Fungsi foto butuh Storage bucket `product-images`, format JPG/PNG/WebP, maksimum 5 MB, dan policy yang membatasi upload berdasarkan role Owner/Admin bisnis. Jangan menjalankannya di project Aurora Digital.
 
-## Peringatan
+## Cara kerja
 
-Ini **bukan aplikasi POS siap transaksi produksi**. Jangan mengaktifkan fungsi checkout lama atau mengasumsikan Pengeluaran/Pembukuan sudah tersedia. Tidak ada data historis POSe diimpor oleh paket ini. Perubahan pada Supabase bergantung pada SQL tahap sebelumnya yang telah berhasil dijalankan.
+Menu Produk > Edit > pilih JPG/PNG/WebP **persegi tepat 1:1**, maksimal 5 MB > Simpan Harga & Foto. File disimpan dalam bucket `product-images`, path disimpan pada kolom `products.image_path` yang **sudah ada** pada skema NUSA POS (tidak memerlukan kolom image_url baru).
 
-## Build
+Frontend tidak memakai service_role key. Upload dan edit memerlukan login dan keanggotaan Owner/Admin bisnis sesuai policy. Harga Manager masih bisa diedit bila mendapat akses seperti sebelumnya; upload foto lebih ketat (Owner/Admin). Bila Anda ingin Manager juga boleh upload, sesuaikan policy Storage dengan otorisasi yang sama setelah audit.
 
-`npm install` lalu `npm run build`. Build lokal tidak dapat diverifikasi di sesi pembuatan paket akibat pemasangan dependency yang time out. Pantau Build Logs Vercel setelah upload dan kirim error jika ada.
+Catatan: ini memperbarui **foto menu**, bukan menyelesaikan checkout produksi. Bila simpan harga sukses tetapi upload foto gagal, harga mungkin sudah berubah; halaman menampilkan error untuk ditindaklanjuti.

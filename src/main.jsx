@@ -84,37 +84,38 @@ function Dashboard({outletId,outlet,membership,profile,memberships,setOutletId})
  <div className="disclaimer"><CircleAlert size={17}/><span>Transaksi historis POSe belum dimigrasikan. Nominal hanya berasal dari tabel sales NUSA POS. HPP dapat belum representatif sampai seluruh resep dan stok diaktifkan. Pengeluaran dan laba operasional belum dihitung sampai modul Pembukuan siap.</span></div>
  </>;
 }
-async function validateSquareImage(file) {
-  if (!file) throw new Error('File gambar belum dipilih.');
 
-  const maxSize = 5 * 1024 * 1024;
-  if (file.size > maxSize) {
-    throw new Error('Ukuran gambar maksimal 5 MB.');
-  }
-
-  const imageUrl = URL.createObjectURL(file);
-
-  const dimension = await new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve({ width: img.width, height: img.height });
-    img.onerror = () => reject(new Error('File gambar tidak valid.'));
-    img.src = imageUrl;
+const IMAGE_BUCKET = 'product-images';
+const MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg','image/png','image/webp']);
+function productImageUrl(path){
+ if(!path || !supabase)return '';
+ // Products stores storage object paths rather than hardcoded environment URLs.
+ if(path.startsWith('http://') || path.startsWith('https://'))return path;
+ return supabase.storage.from(IMAGE_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+async function validateProductImage(file){
+ if(!file)throw new Error('Pilih foto produk terlebih dahulu.');
+ if(!ALLOWED_IMAGE_TYPES.has(file.type))throw new Error('Gunakan JPG, PNG, atau WebP.');
+ if(file.size > MAX_PRODUCT_IMAGE_BYTES)throw new Error('Ukuran maksimal 5 MB.');
+ const objectUrl=URL.createObjectURL(file);
+ try{
+  const dims=await new Promise((resolve,reject)=>{
+   const img=new Image();
+   img.onload=()=>resolve({width:img.naturalWidth,height:img.naturalHeight});
+   img.onerror=()=>reject(new Error('File bukan gambar valid.'));
+   img.src=objectUrl;
   });
-
-  URL.revokeObjectURL(imageUrl);
-
-  if (dimension.width !== dimension.height) {
-    throw new Error('Gambar harus rasio 1:1 (persegi).');
-  }
-
-  return true;
+  if(!dims.width || dims.width!==dims.height)throw new Error('Foto harus benar-benar 1:1 (persegi).');
+ }finally{URL.revokeObjectURL(objectUrl);}
+ return true;
 }
 function App(){
  const [session,setSession]=useState(null),[booting,setBooting]=useState(true),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[loginBusy,setLoginBusy]=useState(false);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
  const [memberships,setMemberships]=useState([]),[outletId,setOutletId]=useState(''),[profile,setProfile]=useState(null),[products,setProducts]=useState([]),[prices,setPrices]=useState([]),[catalogBusy,setCatalogBusy]=useState(false);
  const [page,setPage]=useState('Dashboard');
- const [query,setQuery]=useState(''),[category,setCategory]=useState('SEMUA'),[editing,setEditing]=useState(null),[booth,setBooth]=useState(''),[online,setOnline]=useState(''),[saving,setSaving]=useState(false),[sidebarOpen,setSidebarOpen]=useState(false);
+ const [query,setQuery]=useState(''),[category,setCategory]=useState('SEMUA'),[imageFile,setImageFile]=useState(null),[imagePreview,setImagePreview]=useState(''),[imageBusy,setImageBusy]=useState(false),[editing,setEditing]=useState(null),[booth,setBooth]=useState(''),[online,setOnline]=useState(''),[saving,setSaving]=useState(false),[sidebarOpen,setSidebarOpen]=useState(false);
  useEffect(()=>{if(!supabase){setBooting(false);return;}let active=true;supabase.auth.getSession().then(({data,error})=>{if(active){setSession(data?.session||null);if(error)setError(error.message);setBooting(false);}});const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,s)=>setSession(s));return()=>{active=false;subscription.unsubscribe();};},[]);
  useEffect(()=>{if(!session){setMemberships([]);setOutletId('');setProducts([]);setProfile(null);return;}let active=true;(async()=>{
   setError('');const uid=session.user.id;
@@ -130,7 +131,7 @@ function App(){
  const membership=memberships.find(m=>m.outlet_id===outletId);const outlet=membership?.outlets;const canEdit=['owner','admin','manager'].includes(membership?.role)&&profile?.is_active;
  const loadCatalog=useCallback(async()=>{if(!outlet?.business_id)return;setCatalogBusy(true);setError('');
   const [p,price]=await Promise.all([
-   supabase.from('products').select('id,sku,name,product_type,is_active,category_id,product_categories(name)').eq('business_id',outlet.business_id).order('sort_order').order('name'),
+   supabase.from('products').select('id,sku,name,image_path,product_type,is_active,category_id,product_categories(name)').eq('business_id',outlet.business_id).order('sort_order').order('name'),
    supabase.from('product_prices').select('product_id,channel,price,is_active').eq('outlet_id',outletId).in('channel',['BOOTH','ONLINE'])
   ]);
   if(p.error)setError('Gagal membaca produk: '+p.error.message);if(price.error)setError('Gagal membaca harga: '+price.error.message);
@@ -144,22 +145,54 @@ function App(){
  const priceFor=(id,channel)=>prices.find(p=>p.product_id===id&&p.channel===channel&&p.is_active)?.price??null;
  async function login(e){e.preventDefault();setLoginBusy(true);setError('');const {error:e2}=await supabase.auth.signInWithPassword({email:email.trim(),password});if(e2)setError(e2.message);setLoginBusy(false);setPassword('');}
  async function logout(){await supabase.auth.signOut();setNotice('');setError('');}
- function editProduct(p){setEditing(p);setBooth(priceFor(p.id,'BOOTH')?.toString()??'');setOnline(priceFor(p.id,'ONLINE')?.toString()??'');setError('');setNotice('');}
- async function savePrice(){if(!editing||!canEdit)return;const valid=n=>n.trim()!==''&&Number.isFinite(Number(n))&&Number(n)>=0&&Number(n)<=999999999&&Math.round(Number(n)*100)===Number(n)*100;
-  if(!valid(booth)||!valid(online)){setError('Isi kedua harga dengan angka tidak negatif.');return;}
-  setSaving(true);setError('');setNotice('');
-  // Dua harga diproses berurutan. Jika harga kedua gagal, perubahan pertama tetap tersimpan.
-  for(const [channel,value] of [['BOOTH',booth],['ONLINE',online]]){
-   const {error:e2}=await supabase.rpc('set_product_price',{p_outlet_id:outletId,p_product_sku:editing.sku,p_channel:channel,p_new_price:Number(value)});
-   if(e2){setError('Penyimpanan '+channel+' gagal: '+e2.message+'. Periksa kembali kedua harga.');setSaving(false);await loadCatalog();return;}
-  }
-  setNotice('Harga '+editing.name+' berhasil diperbarui.');setEditing(null);setSaving(false);await loadCatalog();
+ function editProduct(p){setEditing(p);setBooth(priceFor(p.id,'BOOTH')?.toString()??'');setOnline(priceFor(p.id,'ONLINE')?.toString()??'');setImageFile(null);setImagePreview(productImageUrl(p.image_path));setError('');setNotice('');}
+ function closeProductModal(){if(saving||imageBusy)return;setEditing(null);setImageFile(null);setImagePreview('');}
+ async function selectProductImage(file){
+  if(!file)return;
+  try{
+   await validateProductImage(file);
+   setImageFile(file);setImagePreview(URL.createObjectURL(file));setError('');
+  }catch(e){setImageFile(null);setError(e.message||'Foto tidak valid.');}
  }
+ useEffect(()=>()=>{if(imagePreview.startsWith('blob:'))URL.revokeObjectURL(imagePreview)},[imagePreview]);
+ async function uploadProductImage(product){
+  if(!imageFile)return false;
+  if(!outlet?.business_id)throw new Error('Bisnis belum dipilih.');
+  await validateProductImage(imageFile);
+  setImageBusy(true);
+  const ext={'image/jpeg':'jpg','image/png':'png','image/webp':'webp'}[imageFile.type];
+  const path=`${outlet.business_id}/${product.id}/${crypto.randomUUID()}.${ext}`;
+  try{
+   const uploaded=await supabase.storage.from(IMAGE_BUCKET).upload(path,imageFile,{cacheControl:'3600',upsert:false,contentType:imageFile.type});
+   if(uploaded.error)throw new Error('Upload foto gagal: '+uploaded.error.message);
+   const saved=await supabase.from('products').update({image_path:path}).eq('id',product.id).eq('business_id',outlet.business_id).select('id').single();
+   if(saved.error){await supabase.storage.from(IMAGE_BUCKET).remove([path]);throw new Error('Gagal menyimpan foto produk: '+saved.error.message);}
+   return true;
+  }finally{setImageBusy(false);}
+ }
+ async function savePrice(){
+  if(!editing||!canEdit||saving)return;
+  const valid=n=>n.trim()!==''&&Number.isFinite(Number(n))&&Number(n)>=0&&Number(n)<=999999999&&Math.round(Number(n)*100)===Number(n)*100;
+  if(!valid(booth)||!valid(online)){setError('Isi harga Booth dan Online dengan angka valid.');return;}
+  setSaving(true);setError('');setNotice('');
+  try{
+   // Save independently; if one fails, show the error so the user can retry.
+   for(const [channel,value] of [['BOOTH',booth],['ONLINE',online]]){
+    const r=await supabase.rpc('set_product_price',{p_outlet_id:outletId,p_product_sku:editing.sku,p_channel:channel,p_new_price:Number(value)});
+    if(r.error)throw new Error('Harga '+channel+' gagal disimpan: '+r.error.message);
+   }
+   const photoUpdated=await uploadProductImage(editing);
+   setNotice(photoUpdated?'Harga dan foto produk berhasil diperbarui.':'Harga produk berhasil diperbarui.');
+   setEditing(null);setImageFile(null);setImagePreview('');await loadCatalog();
+  }catch(e){setError(e.message||'Gagal menyimpan produk.');await loadCatalog();}
+  finally{setSaving(false);}
+ }
+
  if(!configReady)return <div className="center"><div className="login-card"><div className="brand-mark">N</div><h1>Konfigurasi belum lengkap</h1><p>Atur <code>VITE_SUPABASE_URL</code> dan <code>VITE_SUPABASE_PUBLISHABLE_KEY</code> terlebih dahulu. Lihat README.md.</p></div></div>;
  if(booting)return <div className="center"><span className="spinner"/> Memeriksa sesi login…</div>;
  if(!session)return <div className="center login-bg"><form className="login-card" onSubmit={login}><div className="brand-mark">N</div><h1>NUSA POS <span>2.0</span></h1><p>Masuk ke sistem manajemen Kopi Nusa</p><label>Email Admin / Kasir</label><input type="email" required autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)} placeholder="email@contoh.com"/><label>Password</label><input type="password" required autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Masukkan password"/>{error&&<div className="alert error">{error}</div>}<button type="submit" className="primary wide" disabled={loginBusy}>{loginBusy?'Masuk…':'Masuk ke NUSA POS'}</button><small>Login menggunakan Supabase Authentication project Kopi Nusa.</small></form></div>;
  return <div className="shell">
-  <aside className={'sidebar '+(sidebarOpen?'show':'')}><div className="logo"><div className="brand-mark small">N</div><div><strong>NUSA POS</strong><span>MANAGEMENT 2.0</span></div></div><div className="side-label">MENU UTAMA</div><nav>{NAV.map(({label,icon:Icon,enabled})=><button key={label} className={'nav-item '+(enabled&&page===label?'active':'')} disabled={!enabled} onClick={()=>{setPage(label);setSidebarOpen(false);setError('');setNotice('');}}><Icon size={19}/><span>{label}</span>{!enabled&&<span className="soon">Segera</span>}</button>)}</nav><div className="sidebar-bottom"><span>Versi pengembangan · 0.4.0</span><button className="nav-item" onClick={logout}><LogOut size={18}/> Keluar</button></div></aside>
+  <aside className={'sidebar '+(sidebarOpen?'show':'')}><div className="logo"><div className="brand-mark small">N</div><div><strong>NUSA POS</strong><span>MANAGEMENT 2.0</span></div></div><div className="side-label">MENU UTAMA</div><nav>{NAV.map(({label,icon:Icon,enabled})=><button key={label} className={'nav-item '+(enabled&&page===label?'active':'')} disabled={!enabled} onClick={()=>{setPage(label);setSidebarOpen(false);setError('');setNotice('');}}><Icon size={19}/><span>{label}</span>{!enabled&&<span className="soon">Segera</span>}</button>)}</nav><div className="sidebar-bottom"><span>Versi pengembangan · 0.4.1</span><button className="nav-item" onClick={logout}><LogOut size={18}/> Keluar</button></div></aside>
   {sidebarOpen&&<button className="overlay" onClick={()=>setSidebarOpen(false)} aria-label="Tutup menu"/>}
   <main className="main"><header className="topbar"><button className="icon-btn mobile" onClick={()=>setSidebarOpen(true)}><Menu/></button><div className="breadcrumb">Admin <span>/</span> <strong>{page}</strong></div><div className="topright"><span className="user-avatar">{(profile?.full_name||session.user.email||'A')[0].toUpperCase()}</span><div className="user-text"><b>{profile?.full_name||session.user.email}</b><span>{membership?.role||'Belum ada role'}</span></div></div></header>
   <div className="content">{page==='Dashboard' ? <Dashboard outletId={outletId} outlet={outlet} membership={membership} profile={profile} memberships={memberships} setOutletId={setOutletId}/> : page==='Inventory' ? <Inventory outletId={outletId} businessId={outlet?.business_id} role={membership?.role}/> : page==='Kasir Booth' ? <Cashier outletId={outletId} businessId={outlet?.business_id}/> : page==='Kasir Online' ? <Cashier outletId={outletId} businessId={outlet?.business_id} online/> : page==='Pembukuan' ? <Finance/> : page==='Laporan' ? <Reports outletId={outletId}/> : page==='Manajemen Tim' ? <Team outletId={outletId}/> : page==='Pengaturan' ? <AppSettings outlet={outlet} membership={membership}/> : <><div className="heading"><div><div className="eyebrow">KATALOG KOPI NUSA</div><h1>Menu Produk</h1><p>Kelola harga Booth dan Online dari satu dashboard.</p></div><button className="secondary" onClick={loadCatalog} disabled={!outletId||catalogBusy}><RefreshCw size={17}/> Segarkan</button></div>
@@ -168,10 +201,10 @@ function App(){
   <section className="context-card"><div><div className="label">OUTLET AKTIF</div><div className="select-wrap"><Store size={17}/><select value={outletId} onChange={e=>setOutletId(e.target.value)}>{memberships.map(x=><option key={x.outlet_id} value={x.outlet_id}>{x.outlets?.name} · {x.outlets?.code}</option>)}</select><ChevronDown size={16}/></div></div><div className="right-note"><ShieldCheck size={17}/>{membership?.role?'Akses: '+membership.role:'Tidak ada akses'}</div></section>
   {!memberships.length?<div className="empty"><LockKeyhole size={38}/><h2>Akses outlet belum tersedia</h2><p>Pastikan akun ada di <code>profiles</code> dan <code>outlet_memberships</code>. Cek kembali SQL Tahap 01C.</p></div>:<><div className="stats"><div className="stat"><span>Produk aktif</span><b>{products.filter(p=>p.is_active).length}</b></div><div className="stat"><span>Menu utama</span><b>{products.filter(p=>p.product_type!=='addon').length}</b></div><div className="stat"><span>Addon</span><b>{products.filter(p=>p.product_type==='addon').length}</b></div><div className="stat"><span>Harga belum lengkap</span><b>{products.filter(p=>priceFor(p.id,'BOOTH')===null||priceFor(p.id,'ONLINE')===null).length}</b></div></div>
   <section className="table-card"><div className="table-head"><div><h2>Daftar Produk</h2><p>Harga mengikuti outlet terpilih. Perubahan hanya berlaku untuk transaksi baru.</p></div><div className="filters"><div className="search"><Search size={17}/><input placeholder="Cari produk atau SKU" value={query} onChange={e=>setQuery(e.target.value)}/></div><select value={category} onChange={e=>setCategory(e.target.value)}><option value="SEMUA">Semua</option><option value="MENU">Menu utama</option><option value="ADDON">Addon</option></select></div></div>
-  <div className="table-scroll"><table><thead><tr><th>PRODUK</th><th>JENIS</th><th>HARGA BOOTH</th><th>HARGA ONLINE</th><th>STATUS</th><th/></tr></thead><tbody>{display.map(p=><tr key={p.id}><td><div className="product-name"><div className="product-pic"><Coffee size={20}/></div><div><strong>{p.name}</strong><small>{p.sku}</small></div></div></td><td>{p.product_categories?.name||p.product_type}</td><td className="num">{rupiah(priceFor(p.id,'BOOTH'))}</td><td className="num">{rupiah(priceFor(p.id,'ONLINE'))}</td><td><span className={'pill '+(p.is_active?'enabled':'disabled')}>{p.is_active?'Aktif':'Nonaktif'}</span></td><td>{canEdit&&<button className="edit-btn" title="Edit harga" onClick={()=>editProduct(p)}><Pencil size={15}/> Edit</button>}</td></tr>)}{!display.length&&<tr><td colSpan="6" className="no-results">{catalogBusy?'Memuat katalog…':'Tidak ada produk ditemukan.'}</td></tr>}</tbody></table></div><div className="table-footer">Menampilkan {display.length} dari {products.length} produk · Harga dalam rupiah</div></section>
+  <div className="table-scroll"><table><thead><tr><th>PRODUK</th><th>JENIS</th><th>HARGA BOOTH</th><th>HARGA ONLINE</th><th>STATUS</th><th/></tr></thead><tbody>{display.map(p=><tr key={p.id}><td><div className="product-name"><div className="product-pic">{p.image_path?<img className="product-thumb" src={productImageUrl(p.image_path)} alt={p.name} loading="lazy"/>:<Coffee size={20}/>}</div><div><strong>{p.name}</strong><small>{p.sku}</small></div></div></td><td>{p.product_categories?.name||p.product_type}</td><td className="num">{rupiah(priceFor(p.id,'BOOTH'))}</td><td className="num">{rupiah(priceFor(p.id,'ONLINE'))}</td><td><span className={'pill '+(p.is_active?'enabled':'disabled')}>{p.is_active?'Aktif':'Nonaktif'}</span></td><td>{canEdit&&<button className="edit-btn" title="Edit harga dan foto" onClick={()=>editProduct(p)}><Pencil size={15}/> Edit</button>}</td></tr>)}{!display.length&&<tr><td colSpan="6" className="no-results">{catalogBusy?'Memuat katalog…':'Tidak ada produk ditemukan.'}</td></tr>}</tbody></table></div><div className="table-footer">Menampilkan {display.length} dari {products.length} produk · Harga dalam rupiah</div></section>
   <div className="disclaimer"><CircleAlert size={17}/><span>Starter ini hanya mengaktifkan login, pemilihan outlet, katalog, dan edit harga. Checkout belum diaktifkan sampai resep, stok, dan fungsi checkout terpadu aman diuji.</span></div></>}
   </>}</div></main>
-  {editing&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget&&!saving)setEditing(null)}}><div className="modal" role="dialog" aria-modal="true" aria-label="Ubah harga"><div className="modal-title"><div><div className="eyebrow">HARGA PRODUK · {outlet?.code}</div><h2>{editing.name}</h2><small>{editing.sku}</small></div><button className="icon-btn" onClick={()=>setEditing(null)} disabled={saving}><X/></button></div><div className="modal-fields"><label>Harga Booth (Rp)<input type="number" min="0" step="1" value={booth} onChange={e=>setBooth(e.target.value)}/></label><label>Harga Online (Rp)<input type="number" min="0" step="1" value={online} onChange={e=>setOnline(e.target.value)}/></label></div><p className="muted">Simpan akan memanggil fungsi Supabase <code>set_product_price</code> untuk setiap channel.</p><div className="modal-actions"><button className="secondary" disabled={saving} onClick={()=>setEditing(null)}>Batal</button><button className="primary" disabled={saving} onClick={savePrice}>{saving?'Menyimpan…':'Simpan Harga'}</button></div></div></div>}
+  {editing&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)closeProductModal()}}><div className="modal" role="dialog" aria-modal="true" aria-label="Ubah harga"><div className="modal-title"><div><div className="eyebrow">HARGA PRODUK · {outlet?.code}</div><h2>{editing.name}</h2><small>{editing.sku}</small></div><button className="icon-btn" onClick={closeProductModal} disabled={saving||imageBusy}><X/></button></div><div className="modal-fields"><label>Harga Booth (Rp)<input type="number" min="0" step="1" value={booth} onChange={e=>setBooth(e.target.value)}/></label><label>Harga Online (Rp)<input type="number" min="0" step="1" value={online} onChange={e=>setOnline(e.target.value)}/></label></div><div className="image-upload-box"><label htmlFor="menu-image">Foto menu · persegi 1:1 · maksimal 5 MB</label><div className="image-upload-row"><div className="image-preview">{imagePreview?<img src={imagePreview} alt="Preview foto produk"/>:<Coffee size={32}/>}</div><div className="image-upload-content"><input id="menu-image" type="file" accept="image/jpeg,image/png,image/webp" disabled={saving||imageBusy} onChange={e=>{selectProductImage(e.target.files?.[0]);e.target.value='';}}/><small>JPG, PNG, WebP. Foto tidak persegi atau lebih dari 5 MB otomatis ditolak.</small>{imageFile&&<small className="image-picked">Terpilih: {imageFile.name} ({(imageFile.size/1048576).toFixed(2)} MB)</small>}</div></div></div><p className="muted">Harga disimpan melalui set_product_price. Foto diunggah ke Supabase Storage dan disimpan di image_path.</p>{error&&<div className="alert error">{error}</div>}<div className="modal-actions"><button className="secondary" disabled={saving||imageBusy} onClick={closeProductModal}>Batal</button><button className="primary" disabled={saving||imageBusy} onClick={savePrice}>{saving||imageBusy?'Menyimpan…':'Simpan Harga & Foto'}</button></div></div></div>}
  </div>;
 }
 createRoot(document.getElementById('root')).render(<App/>);
