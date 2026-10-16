@@ -84,7 +84,31 @@ function Dashboard({outletId,outlet,membership,profile,memberships,setOutletId})
  <div className="disclaimer"><CircleAlert size={17}/><span>Transaksi historis POSe belum dimigrasikan. Nominal hanya berasal dari tabel sales NUSA POS. HPP dapat belum representatif sampai seluruh resep dan stok diaktifkan. Pengeluaran dan laba operasional belum dihitung sampai modul Pembukuan siap.</span></div>
  </>;
 }
+async function validateSquareImage(file) {
+  if (!file) throw new Error('File gambar belum dipilih.');
 
+  const maxSize = 5 * 1024 * 1024;
+  if (file.size > maxSize) {
+    throw new Error('Ukuran gambar maksimal 5 MB.');
+  }
+
+  const imageUrl = URL.createObjectURL(file);
+
+  const dimension = await new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve({ width: img.width, height: img.height });
+    img.onerror = () => reject(new Error('File gambar tidak valid.'));
+    img.src = imageUrl;
+  });
+
+  URL.revokeObjectURL(imageUrl);
+
+  if (dimension.width !== dimension.height) {
+    throw new Error('Gambar harus rasio 1:1 (persegi).');
+  }
+
+  return true;
+}
 function App(){
  const [session,setSession]=useState(null),[booting,setBooting]=useState(true),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[loginBusy,setLoginBusy]=useState(false);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
