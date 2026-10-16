@@ -38,3 +38,14 @@ npm run build
 
 ## Catatan keamanan
 Pemeriksaan Supabase RLS dan pengujian checkout tetap diperlukan sebelum transaksi produksi. Dashboard adalah tampilan baca-saja dan tidak memodifikasi data transaksi.
+
+
+## v0.3.0 — Inventory & Resep
+
+Menu **Inventory** sekarang aktif dengan: Master Bahan & Saldo, Stok Masuk, Riwayat Penerimaan, dan Resep & HPP. Pemakaian RPC yang sudah dibuat pada tahap SQL sebelumnya: `receive_inventory`, `create_recipe_draft`, `save_recipe_material`, `activate_recipe_version`.
+
+**Syarat**: SQL Tahap 03A–03C, 03B, 04G-1, 04G-7, 04G-8 sudah diterapkan. Akun harus terhubung ke `profiles` dan `outlet_memberships`. Owner/Admin bisa mengelola resep; Owner/Admin/Manager bisa mencatat stok masuk. Pada aplikasi tetap gunakan environment variables yang sama (jangan mengupload `.env`).
+
+**Batasan**: harga bahan yang belum tercatat dapat menyebabkan HPP belum tersedia. Aplikasi tidak langsung mengubah saldo stok; semua penerimaan memakai RPC terkontrol. Pengurangan stok lewat checkout tetap NONAKTIF. Jangan menggunakan stok uji sebagai stok produksi.
+
+**Perbarui GitHub**: unggah seluruh isi ZIP ini ke root repository yang saat ini dipakai Vercel. Pastikan `src/main.jsx` dan `src/style.css` benar-benar tertimpa, dan teks versi sidebar berubah ke `0.3.0`.

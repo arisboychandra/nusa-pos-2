@@ -9,7 +9,7 @@ const NAV = [
   {label:'Menu Produk',icon:Coffee,enabled:true},
   {label:'Kasir Booth',icon:ShoppingCart,enabled:false},
   {label:'Kasir Online',icon:Store,enabled:false},
-  {label:'Inventory',icon:Package,enabled:false},
+  {label:'Inventory',icon:Package,enabled:true},
   {label:'Pembukuan',icon:BookOpen,enabled:false},
   {label:'Laporan',icon:BarChart3,enabled:false},
   {label:'Manajemen Tim',icon:Users,enabled:false},
@@ -84,6 +84,88 @@ function Dashboard({outletId,outlet,membership,profile,memberships,setOutletId})
  </>;
 }
 
+
+function Inventory({outletId,outlet,membership,profile,memberships,setOutletId,products}){
+ const [tab,setTab]=useState('materials'),[materials,setMaterials]=useState([]),[balances,setBalances]=useState([]),[receipts,setReceipts]=useState([]),[recipes,setRecipes]=useState([]),[recipeItems,setRecipeItems]=useState([]);
+ const [busy,setBusy]=useState(false),[saving,setSaving]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
+ const [q,setQ]=useState(''),[material,setMaterial]=useState(''),[quantity,setQuantity]=useState(''),[unit,setUnit]=useState(''),[totalCost,setTotalCost]=useState(''),[note,setNote]=useState('');
+ const [sku,setSku]=useState(''),[recipeId,setRecipeId]=useState(''),[recipeMaterial,setRecipeMaterial]=useState(''),[recipeQty,setRecipeQty]=useState('');
+ const manageStock=['owner','admin','manager'].includes(membership?.role)&&profile?.is_active;
+ const manageRecipe=['owner','admin'].includes(membership?.role)&&profile?.is_active;
+ const load=useCallback(async()=>{
+  if(!outletId||!outlet?.business_id){setMaterials([]);setBalances([]);setReceipts([]);setRecipes([]);setRecipeItems([]);return;}
+  setBusy(true);setError('');
+  const [m,b,r,rv,ri]=await Promise.all([
+   supabase.from('inventory_materials').select('id,code,name,category,base_unit,is_active').eq('business_id',outlet.business_id).order('category').order('name'),
+   supabase.from('inventory_balances').select('material_id,quantity,average_cost,minimum_stock,inventory_value').eq('outlet_id',outletId),
+   supabase.from('inventory_receipts').select('id,material_id,quantity,total_cost,reference_note,created_at').eq('outlet_id',outletId).order('created_at',{ascending:false}).limit(50),
+   supabase.from('recipe_versions').select('id,product_id,version_no,status,notes,created_at').eq('business_id',outlet.business_id).order('version_no',{ascending:false}),
+   supabase.from('recipe_items').select('id,recipe_version_id,material_id,quantity').eq('business_id',outlet.business_id)
+  ]);
+  const problems=[['Bahan',m],['Saldo',b],['Stok masuk',r],['Versi resep',rv],['Detail resep',ri]].filter(x=>x[1].error);
+  if(problems.length)setError(problems.map(([name,res])=>name+': '+res.error.message).join(' | '));
+  else {setMaterials(m.data||[]);setBalances(b.data||[]);setReceipts(r.data||[]);setRecipes(rv.data||[]);setRecipeItems(ri.data||[]);}
+  setBusy(false);
+ },[outletId,outlet?.business_id]);
+ useEffect(()=>{load();},[load]);
+ useEffect(()=>{setRecipeId('');setSku('');},[outletId]);
+ const balanceFor=id=>balances.find(b=>b.material_id===id);
+ const selectedMaterial=materials.find(m=>m.id===material);
+ const baseUnit=selectedMaterial?.base_unit||'g';
+ const receiptUnits=baseUnit==='g'?[{v:'g',l:'Gram'},{v:'kg',l:'Kilogram'}]:baseUnit==='ml'?[{v:'ml',l:'Mililiter'},{v:'liter',l:'Liter'}]:[{v:'pcs',l:'Pcs'}];
+ useEffect(()=>{setUnit(baseUnit);},[baseUnit]);
+ const qtyBase=Number(quantity||0)*(unit==='kg'||unit==='liter'?1000:1);
+ const selectedProduct=products.find(p=>p.sku===sku);
+ const relevantRecipes=recipes.filter(rv=>rv.product_id===selectedProduct?.id).sort((a,b)=>b.version_no-a.version_no);
+ const selectedRecipe=recipes.find(rv=>rv.id===recipeId);
+ const ingredients=recipeItems.filter(ri=>ri.recipe_version_id===recipeId);
+ const estimatedHpp=ingredients.reduce((sum,ri)=>sum+Number(ri.quantity)*(Number(balanceFor(ri.material_id)?.average_cost)||0),0);
+ const missingCost=ingredients.some(ri=>!Number(balanceFor(ri.material_id)?.average_cost));
+ const inventoryValue=balances.reduce((sum,b)=>sum+Number(b.inventory_value||0),0);
+ const low=materials.filter(m=>{const b=balanceFor(m.id);return b&&Number(b.minimum_stock)>0&&Number(b.quantity)<=Number(b.minimum_stock);}).length;
+ const unitLabel=id=>materials.find(m=>m.id===id)?.base_unit||'';
+ async function submitReceipt(e){e.preventDefault();if(!manageStock||saving)return;
+  if(!selectedMaterial||!Number.isFinite(qtyBase)||qtyBase<=0||Math.round(qtyBase*1000)!==qtyBase*1000||!Number.isFinite(Number(totalCost))||Number(totalCost)<0||!totalCost.trim()){setError('Jumlah dan biaya tidak valid.');return;}
+  if(!window.confirm(`Catat stok masuk ${qtyBase.toLocaleString('id-ID')} ${baseUnit} ${selectedMaterial.name} dengan biaya ${rupiah(Number(totalCost))}?`))return;
+  setSaving(true);setError('');setNotice('');
+  const requestKey=crypto.randomUUID();
+  const {error:e2}=await supabase.rpc('receive_inventory',{p_outlet_id:outletId,p_material_id:material,p_quantity:qtyBase,p_total_cost:Number(totalCost),p_request_key:requestKey,p_note:note.trim()||null});
+  if(e2)setError('Stok masuk gagal: '+e2.message);else {setNotice('Stok masuk berhasil dicatat.');setQuantity('');setTotalCost('');setNote('');await load();}
+  setSaving(false);
+ }
+ async function newDraft(){if(!manageRecipe||!sku)return;setSaving(true);setError('');setNotice('');
+  const {data,error:e2}=await supabase.rpc('create_recipe_draft',{p_product_sku:sku,p_notes:'Draft dari Admin NUSA POS'});
+  if(e2)setError('Gagal membuat draft: '+e2.message);else{await load();setRecipeId(data?.recipe_id||'');setNotice(data?.already_exists?'Menggunakan draft yang sudah ada.':'Draft resep berhasil dibuat.');}
+  setSaving(false);
+ }
+ async function saveIngredient(e){e.preventDefault();if(!manageRecipe||!recipeId||!recipeMaterial||saving)return;
+  const n=Number(recipeQty);if(!Number.isFinite(n)||n<=0||Math.round(n*1000)!==n*1000){setError('Takaran harus positif dengan maksimal tiga angka desimal.');return;}
+  setSaving(true);setError('');setNotice('');const m=materials.find(x=>x.id===recipeMaterial);
+  const {error:e2}=await supabase.rpc('save_recipe_material',{p_recipe_id:recipeId,p_material_code:m.code,p_quantity:n});
+  if(e2)setError('Gagal menyimpan bahan: '+e2.message);else{setNotice('Bahan resep tersimpan.');setRecipeQty('');await load();}
+  setSaving(false);
+ }
+ async function activate(){if(!manageRecipe||!selectedRecipe||selectedRecipe.status!=='draft'||!ingredients.length||saving)return;
+  if(!window.confirm('Aktifkan resep ini? Resep aktif sebelumnya akan diarsipkan dan takaran versi ini tidak dapat diedit kembali.'))return;
+  setSaving(true);setError('');setNotice('');
+  const {error:e2}=await supabase.rpc('activate_recipe_version',{p_recipe_id:recipeId});
+  if(e2)setError('Aktivasi gagal: '+e2.message);else{setNotice('Resep telah diaktifkan.');await load();}
+  setSaving(false);
+ }
+ return <>
+  <div className="heading"><div><div className="eyebrow">OPERASIONAL KOPI NUSA</div><h1>Inventory & Resep</h1><p>Saldo stok per outlet, penerimaan bahan, serta versi resep dan estimasi HPP.</p></div><button className="secondary" onClick={load} disabled={busy}><RefreshCw size={17}/> Segarkan</button></div>
+  {error&&<div className="alert error"><CircleAlert size={17}/>{error}</div>}
+  {notice&&<div className="alert success"><CheckCircle2 size={17}/>{notice}</div>}
+  <section className="context-card"><div><div className="label">OUTLET AKTIF</div><div className="select-wrap"><Store size={17}/><select value={outletId} onChange={e=>setOutletId(e.target.value)}>{memberships.map(m=><option key={m.outlet_id} value={m.outlet_id}>{m.outlets?.name} · {m.outlets?.code}</option>)}</select><ChevronDown size={16}/></div></div><div className="right-note"><ShieldCheck size={17}/> Akses: {membership?.role||'-'}</div></section>
+  <div className="stats"><div className="stat"><span>Jenis Bahan</span><b>{materials.length}</b></div><div className="stat"><span>Nilai Persediaan</span><b className="stat-money">{rupiah(inventoryValue)}</b></div><div className="stat"><span>Stok Minimum Tercapai</span><b>{low}</b></div><div className="stat"><span>Resep Aktif</span><b>{recipes.filter(r=>r.status==='active').length}</b></div></div>
+  <div className="inv-tabs">{[['materials','Master Bahan & Saldo'],['receipt','Stok Masuk'],['recipes','Resep & HPP']].map(([id,label])=><button key={id} className={tab===id?'chosen':''} onClick={()=>setTab(id)}>{label}</button>)}</div>
+  {tab==='materials'&&<section className="table-card"><div className="table-head"><div><h2>Stok Bahan Baku</h2><p>Saldo dan rata-rata biaya dari Supabase · jumlah dalam g, ml atau pcs.</p></div><div className="search"><Search size={17}/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Cari bahan atau kode"/></div></div><div className="table-scroll"><table><thead><tr><th>BAHAN BAKU</th><th>SATUAN</th><th>STOK</th><th>RATA-RATA / UNIT</th><th>NILAI STOK</th><th>MINIMUM</th></tr></thead><tbody>{materials.filter(m=>(m.name+' '+m.code).toLowerCase().includes(q.toLowerCase())).map(m=>{const b=balanceFor(m.id);return <tr key={m.id}><td><strong>{m.name}</strong><div className="muted">{m.code}</div></td><td>{m.base_unit}</td><td className="num">{Number(b?.quantity||0).toLocaleString('id-ID',{maximumFractionDigits:3})}</td><td className="num">{rupiah(Number(b?.average_cost||0))}</td><td className="num">{rupiah(Number(b?.inventory_value||0))}</td><td className="num">{Number(b?.minimum_stock||0).toLocaleString('id-ID')}</td></tr>})}</tbody></table></div><div className="table-footer">{busy?'Memuat data…':`${materials.length} bahan tersedia`} · Saldo hanya bisa diubah melalui transaksi inventory.</div></section>}
+  {tab==='receipt'&&<div className="inv-columns"><section className="table-card inv-pad"><h2>Catat Stok Masuk</h2><p className="inv-muted">Pembelian bahan akan memperbarui moving weighted average dan riwayat mutasi.</p>{!manageStock?<div className="alert error">Akun Anda tidak memiliki izin mencatat stok masuk.</div>:<form className="inv-form" onSubmit={submitReceipt}><label>Bahan Baku<select required value={material} onChange={e=>setMaterial(e.target.value)}><option value="">Pilih bahan</option>{materials.filter(m=>m.is_active).map(m=><option key={m.id} value={m.id}>{m.name} ({m.base_unit})</option>)}</select></label><div className="inv-inline"><label>Jumlah<input type="number" required min="0.001" step="0.001" value={quantity} onChange={e=>setQuantity(e.target.value)} placeholder="Contoh 2"/></label><label>Satuan<select value={unit} onChange={e=>setUnit(e.target.value)}>{receiptUnits.map(x=><option key={x.v} value={x.v}>{x.l}</option>)}</select></label></div><label>Total biaya pembelian (Rp)<input type="number" required min="0" step="0.01" value={totalCost} onChange={e=>setTotalCost(e.target.value)} placeholder="Nominal sebenarnya"/></label><label>Catatan (opsional)<input value={note} onChange={e=>setNote(e.target.value)} placeholder="No. nota / pemasok" maxLength={200}/></label><div className="inv-preview">Jumlah disimpan: <strong>{qtyBase.toLocaleString('id-ID',{maximumFractionDigits:3})} {baseUnit}</strong><br/>Biaya/unit: <strong>{qtyBase>0?rupiah(Number(totalCost||0)/qtyBase):'—'}</strong></div><button className="primary" disabled={saving||!material||qtyBase<=0||totalCost===''}>{saving?'Mencatat…':'Konfirmasi Stok Masuk'}</button></form>}</section><section className="table-card inv-pad"><h2>Riwayat Penerimaan</h2><p className="inv-muted">50 penerimaan terbaru dari outlet ini.</p><div className="inv-history">{receipts.length?receipts.map(r=><div className="inv-history-row" key={r.id}><div><strong>{materials.find(m=>m.id===r.material_id)?.name||'Bahan'}</strong><small>{new Date(r.created_at).toLocaleString('id-ID',{timeZone:'Asia/Jakarta'})} · {r.reference_note||'Tanpa catatan'}</small></div><div><b>+{Number(r.quantity).toLocaleString('id-ID',{maximumFractionDigits:3})} {unitLabel(r.material_id)}</b><small>{rupiah(r.total_cost)}</small></div></div>):<p className="inv-muted">Belum ada stok masuk yang tercatat.</p>}</div></section></div>}
+  {tab==='recipes'&&<div className="inv-columns"><section className="table-card inv-pad"><h2>Kelola Resep Produk</h2><p className="inv-muted">Pilih menu, lalu buat atau buka draft. Hanya Owner/Admin yang dapat menyunting resep.</p><div className="inv-form"><label>Produk<select value={sku} onChange={e=>{setSku(e.target.value);setRecipeId('');}}><option value="">Pilih menu / addon</option>{products.filter(p=>p.is_active).map(p=><option key={p.id} value={p.sku}>{p.name} · {p.sku}</option>)}</select></label>{sku&&<><div className="inv-inline"><label>Versi Resep<select value={recipeId} onChange={e=>setRecipeId(e.target.value)}><option value="">Pilih versi</option>{relevantRecipes.map(rv=><option key={rv.id} value={rv.id}>Versi {rv.version_no} · {rv.status}</option>)}</select></label><div className="inv-form-action"><button className="secondary" disabled={!manageRecipe||saving} onClick={newDraft}>Buat/Buka Draft</button></div></div>{selectedRecipe&&<div className="inv-preview">Versi {selectedRecipe.version_no} · <strong>{selectedRecipe.status.toUpperCase()}</strong> · {ingredients.length} bahan<br/>Estimasi HPP: <strong>{ingredients.length&&!missingCost?rupiah(estimatedHpp):'Belum tersedia'}</strong><small>HPP diperkirakan dari biaya rata-rata saat ini, bukan nilai transaksi historis.</small></div>}</>}</div>{selectedRecipe?.status==='draft'&&manageRecipe&&<form className="inv-form inv-separated" onSubmit={saveIngredient}><label>Tambah / ubah bahan<select required value={recipeMaterial} onChange={e=>setRecipeMaterial(e.target.value)}><option value="">Pilih bahan baku</option>{materials.filter(m=>m.is_active).map(m=><option key={m.id} value={m.id}>{m.name} ({m.base_unit})</option>)}</select></label><label>Takaran per satu produk<input type="number" min="0.001" step="0.001" required value={recipeQty} onChange={e=>setRecipeQty(e.target.value)} placeholder="Takaran asli"/></label><button className="primary" disabled={saving||!recipeMaterial||!recipeQty}>{saving?'Menyimpan…':'Simpan Takaran'}</button><button type="button" className="secondary" disabled={saving||!ingredients.length} onClick={activate}>Aktifkan Resep</button></form>}</section><section className="table-card inv-pad"><h2>Rincian Bahan Resep</h2><p className="inv-muted">Resep yang sudah aktif tidak bisa diubah langsung. Buat draft versi berikutnya jika ada perubahan.</p>{recipeId&&ingredients.length?<div className="inv-history">{ingredients.map(ri=><div key={ri.id} className="inv-history-row"><div><strong>{materials.find(m=>m.id===ri.material_id)?.name||'Bahan'}</strong><small>{unitLabel(ri.material_id)}</small></div><div><b>{Number(ri.quantity).toLocaleString('id-ID',{maximumFractionDigits:3})} {unitLabel(ri.material_id)}</b><small>{rupiah(Number(ri.quantity)*Number(balanceFor(ri.material_id)?.average_cost||0))}</small></div></div>)}</div>:<div className="empty"><Package size={29}/><p>{recipeId?'Belum ada bahan dalam resep draft.':'Pilih produk dan versi resep untuk melihat takaran.'}</p></div>}</section></div>}
+  <div className="disclaimer"><CircleAlert size={17}/><span>Inventory dan resep membaca data Supabase. Checkout tetap belum aktif sampai fungsi kasir dengan addon, penguncian stok dan shift, serta jurnal keuangan selesai diuji. Nilai saldo awal bisa tetap 0 jika belum ada stok masuk.</span></div>
+ </>;
+}
+
 function App(){
  const [session,setSession]=useState(null),[booting,setBooting]=useState(true),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[loginBusy,setLoginBusy]=useState(false);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -134,10 +216,10 @@ function App(){
  if(booting)return <div className="center"><span className="spinner"/> Memeriksa sesi login…</div>;
  if(!session)return <div className="center login-bg"><form className="login-card" onSubmit={login}><div className="brand-mark">N</div><h1>NUSA POS <span>2.0</span></h1><p>Masuk ke sistem manajemen Kopi Nusa</p><label>Email Admin / Kasir</label><input type="email" required autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)} placeholder="email@contoh.com"/><label>Password</label><input type="password" required autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Masukkan password"/>{error&&<div className="alert error">{error}</div>}<button type="submit" className="primary wide" disabled={loginBusy}>{loginBusy?'Masuk…':'Masuk ke NUSA POS'}</button><small>Login menggunakan Supabase Authentication project Kopi Nusa.</small></form></div>;
  return <div className="shell">
-  <aside className={'sidebar '+(sidebarOpen?'show':'')}><div className="logo"><div className="brand-mark small">N</div><div><strong>NUSA POS</strong><span>MANAGEMENT 2.0</span></div></div><div className="side-label">MENU UTAMA</div><nav>{NAV.map(({label,icon:Icon,enabled})=><button key={label} className={'nav-item '+(enabled&&page===label?'active':'')} disabled={!enabled} onClick={()=>{setPage(label);setSidebarOpen(false);setError('');setNotice('');}}><Icon size={19}/><span>{label}</span>{!enabled&&<span className="soon">Segera</span>}</button>)}</nav><div className="sidebar-bottom"><span>Versi pengembangan · 0.2.0</span><button className="nav-item" onClick={logout}><LogOut size={18}/> Keluar</button></div></aside>
+  <aside className={'sidebar '+(sidebarOpen?'show':'')}><div className="logo"><div className="brand-mark small">N</div><div><strong>NUSA POS</strong><span>MANAGEMENT 2.0</span></div></div><div className="side-label">MENU UTAMA</div><nav>{NAV.map(({label,icon:Icon,enabled})=><button key={label} className={'nav-item '+(enabled&&page===label?'active':'')} disabled={!enabled} onClick={()=>{setPage(label);setSidebarOpen(false);setError('');setNotice('');}}><Icon size={19}/><span>{label}</span>{!enabled&&<span className="soon">Segera</span>}</button>)}</nav><div className="sidebar-bottom"><span>Versi pengembangan · 0.3.0</span><button className="nav-item" onClick={logout}><LogOut size={18}/> Keluar</button></div></aside>
   {sidebarOpen&&<button className="overlay" onClick={()=>setSidebarOpen(false)} aria-label="Tutup menu"/>}
   <main className="main"><header className="topbar"><button className="icon-btn mobile" onClick={()=>setSidebarOpen(true)}><Menu/></button><div className="breadcrumb">Admin <span>/</span> <strong>{page}</strong></div><div className="topright"><span className="user-avatar">{(profile?.full_name||session.user.email||'A')[0].toUpperCase()}</span><div className="user-text"><b>{profile?.full_name||session.user.email}</b><span>{membership?.role||'Belum ada role'}</span></div></div></header>
-  <div className="content">{page==='Dashboard' ? <Dashboard outletId={outletId} outlet={outlet} membership={membership} profile={profile} memberships={memberships} setOutletId={setOutletId}/> : <><div className="heading"><div><div className="eyebrow">KATALOG KOPI NUSA</div><h1>Menu Produk</h1><p>Kelola harga Booth dan Online dari satu dashboard.</p></div><button className="secondary" onClick={loadCatalog} disabled={!outletId||catalogBusy}><RefreshCw size={17}/> Segarkan</button></div>
+  <div className="content">{page==='Dashboard' ? <Dashboard outletId={outletId} outlet={outlet} membership={membership} profile={profile} memberships={memberships} setOutletId={setOutletId}/> : page==='Inventory' ? <Inventory outletId={outletId} outlet={outlet} membership={membership} profile={profile} memberships={memberships} setOutletId={setOutletId} products={products}/> : <><div className="heading"><div><div className="eyebrow">KATALOG KOPI NUSA</div><h1>Menu Produk</h1><p>Kelola harga Booth dan Online dari satu dashboard.</p></div><button className="secondary" onClick={loadCatalog} disabled={!outletId||catalogBusy}><RefreshCw size={17}/> Segarkan</button></div>
   {error&&<div className="alert error"><CircleAlert size={18}/>{error}</div>}{notice&&<div className="alert success"><CheckCircle2 size={18}/>{notice}</div>}
   {!profile?.is_active&&<div className="alert error"><LockKeyhole size={18}/>Profil belum aktif atau belum dibuat pada tabel profiles. Minta Owner menautkan akun.</div>}
   <section className="context-card"><div><div className="label">OUTLET AKTIF</div><div className="select-wrap"><Store size={17}/><select value={outletId} onChange={e=>setOutletId(e.target.value)}>{memberships.map(x=><option key={x.outlet_id} value={x.outlet_id}>{x.outlets?.name} · {x.outlets?.code}</option>)}</select><ChevronDown size={16}/></div></div><div className="right-note"><ShieldCheck size={17}/>{membership?.role?'Akses: '+membership.role:'Tidak ada akses'}</div></section>
